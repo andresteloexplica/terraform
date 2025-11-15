@@ -1,0 +1,14 @@
+# DIRECTORIOS GENERADOS AUTOMÁTICAMENTE
+# Archivos binarios de proveedores y módulos descargados
+.terraform/ 
+
+# ARCHIVOS DE ESTADO Y PLANES
+# Archivo de estado principal (contiene información sensible)
+*.tfstate
+# Archivos de copia de seguridad del estado
+*.tfstate.*
+# Archivos de plan generados
+*.tfplan 
+
+# LOCK FILES
+.terraform.lock.hcl
