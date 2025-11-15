@@ -12,3 +12,5 @@
 
 # LOCK FILES
 .terraform.lock.hcl
+# Excluir archivo de variables que a menudo contiene secretos
+terraform.tfvars
