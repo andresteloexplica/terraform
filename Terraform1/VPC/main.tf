@@ -1,115 +1,84 @@
-# 1. RECURSO PRINCIPAL: VPC
-resource "aws_vpc" "main" {
+# La configuración del proveedor y región está ahora en providers.tf
+
+# 1. Recurso para crear la VPC
+resource "aws_vpc" "mi_vpc" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
-  tags = merge(
-    var.default_tags,
-    { Name = "${var.project_name}-vpc" }
-  )
+
+  tags = {
+    Name = "vpc-ejemplo-terraform"
+  }
 }
 
-# 2. INTERNET GATEWAY (IGW)
-# Permite que la VPC se comunique con Internet.
-resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.main.id
-  tags = merge(
-    var.default_tags,
-    { Name = "${var.project_name}-igw" }
-  )
+# 2. Recurso para la Internet Gateway (IGW)
+resource "aws_internet_gateway" "mi_igw" {
+  # Asocia la IGW a la VPC
+  vpc_id = aws_vpc.mi_vpc.id
+
+  tags = {
+    Name = "igw-ejemplo"
+  }
 }
 
-# 3. SUBNET PÚBLICA (para Bastion y NAT Gateway)
-resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.main.id
+# 3. Subred Pública
+resource "aws_subnet" "subnet_publica" {
+  vpc_id                  = aws_vpc.mi_vpc.id
   cidr_block              = var.public_subnet_cidr
-  availability_zone       = var.availability_zone
-  map_public_ip_on_launch = true # Las instancias aquí tendrán IP pública (opcional, pero útil para Bastion)
+  availability_zone       = var.az_name
+  # Habilita la asignación automática de IPs públicas (necesario para la subred pública)
+  map_public_ip_on_launch = true 
 
-  tags = merge(
-    var.default_tags,
-    { Name = "${var.project_name}-public-subnet" }
-  )
+  tags = {
+    Name = "Subnet-Publica"
+  }
 }
 
-# 4. IP ELÁSTICA (EIP)
-# Una dirección IP estática requerida por el NAT Gateway.
-resource "aws_eip" "nat_eip" {
-  domain = "vpc"
-  tags = merge(
-    var.default_tags,
-    { Name = "${var.project_name}-nat-eip" }
-  )
-}
-
-# 5. NAT GATEWAY
-# Permite que las subnets privadas accedan a internet de manera saliente.
-resource "aws_nat_gateway" "nat_gw" {
-  allocation_id = aws_eip.nat_eip.id
-  subnet_id     = aws_subnet.public.id
-  depends_on    = [aws_internet_gateway.igw] # Asegura que el IGW exista primero
-
-  tags = merge(
-    var.default_tags,
-    { Name = "${var.project_name}-nat-gw" }
-  )
-}
-
-# 6. SUBNET PRIVADA (para la aplicación)
-resource "aws_subnet" "private" {
-  vpc_id            = aws_vpc.main.id
+# 4. Subred Privada (usando 10.0.1.0/24)
+resource "aws_subnet" "subnet_privada" {
+  vpc_id            = aws_vpc.mi_vpc.id
   cidr_block        = var.private_subnet_cidr
-  availability_zone = var.availability_zone
-  # Las instancias aquí NO tendrán IP pública
-  map_public_ip_on_launch = false 
+  availability_zone = var.az_name
 
-  tags = merge(
-    var.default_tags,
-    { Name = "${var.project_name}-private-subnet" }
-  )
+  tags = {
+    Name = "Subnet-Privada"
+  }
 }
 
-# 7. TABLA DE RUTEOS PÚBLICA
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-  tags = merge(
-    var.default_tags,
-    { Name = "${var.project_name}-public-rt" }
-  )
+# 5. Tabla de Rutas Pública
+resource "aws_route_table" "route_table_publica" {
+  vpc_id = aws_vpc.mi_vpc.id
+
+  # Ruta que dirige todo el tráfico de Internet (0.0.0.0/0) a la Internet Gateway
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.mi_igw.id
+  }
+
+  tags = {
+    Name = "Route-Table-Publica"
+  }
 }
 
-# RUTA: Todo el tráfico de salida (0.0.0.0/0) va al Internet Gateway (IGW).
-resource "aws_route" "public_internet_route" {
-  route_table_id         = aws_route_table.public.id
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.igw.id
+# 6. Tabla de Rutas Privada
+resource "aws_route_table" "route_table_privada" {
+  vpc_id = aws_vpc.mi_vpc.id
+
+  # Por defecto, solo contendrá la ruta local a la VPC (sin acceso a Internet)
+
+  tags = {
+    Name = "Route-Table-Privada"
+  }
 }
 
-# ASOCIACIÓN: Conecta la Tabla de Ruteo Pública con la Subnet Pública.
-resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public.id
+# 7. Asociación de la Subred Pública con su Route Table
+resource "aws_route_table_association" "public_association" {
+  subnet_id      = aws_subnet.subnet_publica.id
+  route_table_id = aws_route_table.route_table_publica.id
 }
 
-# 8. TABLA DE RUTEOS PRIVADA
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.main.id
-  tags = merge(
-    var.default_tags,
-    { Name = "${var.project_name}-private-rt" }
-  )
-}
-
-# RUTA: Todo el tráfico de salida (0.0.0.0/0) va al NAT Gateway.
-# ESTO GARANTIZA QUE LA SALIDA SEA POR ESE ÚNICO PUNTO.
-resource "aws_route" "private_nat_route" {
-  route_table_id         = aws_route_table.private.id
-  destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.nat_gw.id
-}
-
-# ASOCIACIÓN: Conecta la Tabla de Ruteo Privada con la Subnet Privada.
-resource "aws_route_table_association" "private" {
-  subnet_id      = aws_subnet.private.id
-  route_table_id = aws_route_table.private.id
+# 8. Asociación de la Subred Privada con su Route Table
+resource "aws_route_table_association" "private_association" {
+  subnet_id      = aws_subnet.subnet_privada.id
+  route_table_id = aws_route_table.route_table_privada.id
 }
